@@ -1,0 +1,32 @@
+{
+  "name": "pi-git-sync",
+  "version": "0.1.0",
+  "description": "Sync Pi agent config through Git",
+  "keywords": [
+    "pi-package",
+    "pi",
+    "pi-agent",
+    "git",
+    "sync",
+    "config"
+  ],
+  "author": "daze",
+  "license": "MIT",
+  "type": "module",
+  "files": [
+    "README.md",
+    "LICENSE",
+    "extensions"
+  ],
+  "scripts": {
+    "smoke": "npx esbuild extensions/sync.ts --bundle --platform=node --format=esm --outfile=/tmp/pi-git-sync-smoke.mjs --external:@earendil-works/pi-coding-agent"
+  },
+  "peerDependencies": {
+    "@earendil-works/pi-coding-agent": "*"
+  },
+  "pi": {
+    "extensions": [
+      "./extensions"
+    ]
+  }
+}
