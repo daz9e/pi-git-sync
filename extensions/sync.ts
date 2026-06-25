@@ -279,8 +279,7 @@ async function normalSync(pi: ExtensionAPI, config: Config, ctx: ExtensionComman
 		return;
 	}
 
-	const ahead = await git(["status", "--porcelain", "--branch"]);
-	if (ahead.stdout.includes("ahead")) await mustGit(["push", "origin", config.branch]);
+	await mustGit(["push", "-u", "origin", config.branch]);
 	ctx.ui.notify("Pi config synced", "info");
 }
 
