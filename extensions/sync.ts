@@ -1,4 +1,4 @@
-import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
+import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
 import { cp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
@@ -54,7 +54,9 @@ git/
 node_modules/
 `;
 
-type Config = { repo: string; branch: string };
+type Config = { repo: string; branch: string; lastCheckAt?: string };
+
+const startupCheckEveryMs = 60 * 60 * 1000;
 
 function repoOwner(repo?: string) {
 	if (!repo) return "you";
@@ -86,16 +88,16 @@ Generated automatically by pi-git-sync.
 `;
 }
 
-function sh(cmd: string, args: string[], cwd = agentDir) {
+function sh(cmd: string, args: string[], cwd = agentDir, timeout = 0) {
 	return new Promise<{ code: number; stdout: string; stderr: string }>((resolve) => {
-		execFile(cmd, args, { cwd }, (err, stdout, stderr) => {
+		execFile(cmd, args, { cwd, timeout }, (err, stdout, stderr) => {
 			resolve({ code: (err as any)?.code ?? 0, stdout: String(stdout), stderr: String(stderr) });
 		});
 	});
 }
 
-async function git(args: string[]) {
-	return sh("git", args);
+async function git(args: string[], timeout = 0) {
+	return sh("git", args, agentDir, timeout);
 }
 
 async function mustGit(args: string[]) {
@@ -288,11 +290,41 @@ async function showStatus(ctx: ExtensionCommandContext) {
 	ctx.ui.notify(status.stdout.trim() || "No git status", "info");
 }
 
+async function checkStartupSync(config: Config, ctx: ExtensionContext) {
+	if (!ctx.hasUI || !existsSync(join(agentDir, ".git")) || inMerge()) return;
+	if (config.lastCheckAt && Date.now() - Date.parse(config.lastCheckAt) < startupCheckEveryMs) return;
+
+	const localStatus = await git(["status", "--porcelain", "--", ...allow], 3000);
+	const localHead = await git(["rev-parse", "HEAD"], 3000);
+	const remoteHead = await git(["ls-remote", "origin", config.branch], 5000);
+
+	if (localStatus.code !== 0 || localHead.code !== 0 || remoteHead.code !== 0) return;
+	const remoteSha = remoteHead.stdout.trim().split(/\s+/)[0];
+	let hasRemote = false;
+	if (remoteSha && remoteSha !== localHead.stdout.trim() && (await git(["fetch", "--quiet", "origin", config.branch], 10000)).code === 0) {
+		hasRemote = (await git(["merge-base", "--is-ancestor", `origin/${config.branch}`, "HEAD"], 3000)).code === 1;
+	}
+	const warnings = [
+		localStatus.stdout.trim() ? "Local config changed. Run /sync" : undefined,
+		hasRemote ? "Remote config updated. Run /sync" : undefined,
+	].filter((x): x is string => !!x);
+
+	config.lastCheckAt = new Date().toISOString();
+	await saveConfig(config);
+
+	setTimeout(() => warnings.forEach((warning) => ctx.ui.notify(warning, "info")), 750);
+}
+
 function looksLikeRepo(arg: string) {
 	return /^(git@|https?:\/\/|ssh:\/\/|git:\/\/)/.test(arg) || /^[\w.-]+\/[\w./-]+(\.git)?$/.test(arg);
 }
 
 export default function piGitSync(pi: ExtensionAPI) {
+	pi.on("session_start", async (_event, ctx) => {
+		const config = await loadConfig().catch(() => undefined);
+		if (config) await checkStartupSync(config, ctx);
+	});
+
 	pi.registerCommand("sync", {
 		description: "Sync ~/.pi/agent config through git",
 		getArgumentCompletions: (prefix) => ["status"].filter((x) => x.startsWith(prefix)).map((value) => ({ value, label: value })),
