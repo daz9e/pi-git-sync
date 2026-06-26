@@ -255,6 +255,13 @@ async function normalSync(pi: ExtensionAPI, config: Config, ctx: ExtensionComman
 	if (inMerge()) return continueMerge(config, ctx);
 
 	await commitIfNeeded(`sync: ${new Date().toISOString()}`);
+	const remoteBranch = await git(["ls-remote", "--heads", "origin", config.branch]);
+	if (remoteBranch.code !== 0) throw new Error(remoteBranch.stderr || remoteBranch.stdout || "git ls-remote failed");
+	if (!remoteBranch.stdout.trim()) {
+		await mustGit(["push", "-u", "origin", config.branch]);
+		ctx.ui.notify("Pi config uploaded to new remote branch", "info");
+		return;
+	}
 	const pulled = await git(["pull", "--no-rebase", "--no-edit", "origin", config.branch]);
 	if (pulled.code !== 0) {
 		if (!inMerge()) throw new Error(pulled.stderr || pulled.stdout || "git pull failed");
