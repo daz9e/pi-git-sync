@@ -1,6 +1,6 @@
 {
   "name": "pi-git-sync",
-  "version": "0.1.0",
+  "version": "0.1.2",
   "description": "Sync Pi agent config through Git",
   "keywords": [
     "pi-package",
