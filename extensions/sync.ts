@@ -178,6 +178,7 @@ async function scanSecrets() {
 }
 
 async function commitIfNeeded(message: string) {
+	await mustGit(["reset", "-q"]);
 	await addAllowed();
 	const diff = await git(["diff", "--cached", "--quiet"]);
 	if (diff.code === 0) return false;
@@ -256,6 +257,7 @@ async function normalSync(pi: ExtensionAPI, config: Config, ctx: ExtensionComman
 	await commitIfNeeded(`sync: ${new Date().toISOString()}`);
 	const pulled = await git(["pull", "--no-rebase", "--no-edit", "origin", config.branch]);
 	if (pulled.code !== 0) {
+		if (!inMerge()) throw new Error(pulled.stderr || pulled.stdout || "git pull failed");
 		if (!ctx.hasUI) throw new Error(pulled.stderr || "git pull failed");
 		const choice = await ctx.ui.select("Sync conflict", ["Ask agent to merge", "Abort", "Use local and force push", "Use remote and backup local"]);
 		if (choice === "Ask agent to merge") {
@@ -264,20 +266,20 @@ async function normalSync(pi: ExtensionAPI, config: Config, ctx: ExtensionComman
 			return;
 		}
 		if (choice === "Use local and force push") {
-			await mustGit(["merge", "--abort"]);
+			if (inMerge()) await mustGit(["merge", "--abort"]);
 			await mustGit(["push", "--force-with-lease", "origin", config.branch]);
 			ctx.ui.notify("Local config pushed", "info");
 			return;
 		}
 		if (choice === "Use remote and backup local") {
 			const backup = await backupSafe();
-			await mustGit(["merge", "--abort"]);
+			if (inMerge()) await mustGit(["merge", "--abort"]);
 			await mustGit(["fetch", "origin", config.branch]);
 			await mustGit(["reset", "--hard", `origin/${config.branch}`]);
 			ctx.ui.notify(`Remote config applied. Backup: ${backup}`, "info");
 			return;
 		}
-		await mustGit(["merge", "--abort"]);
+		if (inMerge()) await mustGit(["merge", "--abort"]);
 		return;
 	}
 
@@ -322,7 +324,7 @@ function looksLikeRepo(arg: string) {
 export default function piGitSync(pi: ExtensionAPI) {
 	pi.on("session_start", async (_event, ctx) => {
 		const config = await loadConfig().catch(() => undefined);
-		if (config) await checkStartupSync(config, ctx);
+		if (config) await checkStartupSync(config, ctx).catch(() => undefined);
 	});
 
 	pi.registerCommand("sync", {
